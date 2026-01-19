@@ -185,6 +185,37 @@ import MemberPanel from './components/Member/MemberPanel';
 import ProjectDetail from './components/Project/ProjectDetail';
 import StrategyDetail from './components/Strategy/StrategyDetail';
 
+// Helper to sanitize imported data to avoid crashes (White Screen of Death)
+const sanitizeProjectData = (projects: any[]): Project[] => {
+  if (!Array.isArray(projects)) return [];
+  
+  const sanitizeQuarter = (q: any, id: string): Quarter => ({
+    id: q?.id || id,
+    objective: q?.objective || '',
+    budget: typeof q?.budget === 'number' ? q.budget : 0,
+    spent: typeof q?.spent === 'number' ? q.spent : 0,
+    kpis: Array.isArray(q?.kpis) ? q.kpis : [],
+    tasks: Array.isArray(q?.tasks) ? q.tasks : [],
+  });
+
+  const sanitizeRecursive = (p: any): Project => ({
+    id: p.id || Date.now().toString(),
+    name: p.name || 'Untitled Project',
+    owner: p.owner || null,
+    annualObjective: p.annualObjective || '',
+    weight: typeof p.weight === 'number' ? p.weight : 1,
+    quarters: {
+      q1: sanitizeQuarter(p.quarters?.q1, 'q1'),
+      q2: sanitizeQuarter(p.quarters?.q2, 'q2'),
+      q3: sanitizeQuarter(p.quarters?.q3, 'q3'),
+      q4: sanitizeQuarter(p.quarters?.q4, 'q4'),
+    },
+    subProjects: Array.isArray(p.subProjects) ? p.subProjects.map(sanitizeRecursive) : []
+  });
+
+  return projects.map(sanitizeRecursive);
+};
+
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -212,10 +243,10 @@ export default function App() {
   useEffect(() => {
     const loadedProjects = DataService.loadProjects();
     const loadedMembers = DataService.loadMembers();
-    if (loadedProjects) setProjects(loadedProjects);
+    if (loadedProjects) setProjects(sanitizeProjectData(loadedProjects));
     if (loadedMembers && loadedMembers.length > 0) setMembers(loadedMembers);
     DataService.onSync((type, data) => {
-      if (type === 'PROJECTS_UPDATED') setProjects(data);
+      if (type === 'PROJECTS_UPDATED') setProjects(sanitizeProjectData(data));
       if (type === 'MEMBERS_UPDATED') setMembers(data);
     });
   }, []);
@@ -590,10 +621,15 @@ export default function App() {
       <input type="file" ref={importInputRef} onChange={(e) => {
          const file = e.target.files?.[0];
          if(file) DataService.importData(file).then(({projects, members}) => { 
-             setProjects(projects); 
+             // Sanitize data before setting state to prevent white screen crashes
+             const sanitizedProjects = sanitizeProjectData(projects);
+             setProjects(sanitizedProjects); 
              setMembers(members); 
              setNodePositions({}); // Reset positions
              setPanOffset({x: 0, y: 0}); // Reset pan
+         }).catch(err => {
+             alert("匯入失敗：檔案格式錯誤或損毀。");
+             console.error(err);
          });
       }} accept=".json" className="hidden" />
 
@@ -697,8 +733,8 @@ export default function App() {
              </div>
         )}
 
-        {/* Zoom Controls - MOVED UP from bottom-10 to bottom-36 */}
-        <div className="absolute bottom-36 left-10 z-30 flex flex-col gap-2">
+        {/* Zoom Controls - MOVED TO BOTTOM RIGHT to avoid overlapping with Calendar */}
+        <div className="absolute bottom-10 right-10 z-30 flex flex-col gap-2">
            <button onClick={() => setZoom(z => Math.min(z + 0.1, 4.0))} className="w-10 h-10 bg-white rounded-xl shadow-lg border border-gray-100 flex items-center justify-center text-gray-600 hover:bg-gray-50"><Plus size={18}/></button>
            <button onClick={() => setZoom(z => Math.max(z - 0.1, 0.15))} className="w-10 h-10 bg-white rounded-xl shadow-lg border border-gray-100 flex items-center justify-center text-gray-600 hover:bg-gray-50"><MoreHorizontal size={18}/></button>
            <button onClick={() => { setPanOffset({x:0, y:0}); setNodePositions({}); }} className="w-10 h-10 bg-black text-[#eaff00] rounded-xl shadow-lg flex items-center justify-center hover:scale-105 transition-transform" title="Reset View"><ArrowUp size={18}/></button>
