@@ -4,7 +4,7 @@ import {
   Plus, Target, Network, GalleryHorizontal, 
   User, Users, ChevronLeft, ChevronRight, X, LayoutGrid, 
   Trash2, AlertCircle, MoreHorizontal, Search, Filter, ArrowUp, Download, Upload,
-  GitBranch, CheckCircle2, Clock, Info, Activity, GripHorizontal, Pin, Settings2, Bell
+  GitBranch, CheckCircle2, Clock, Info, Activity, GripHorizontal, Pin, Settings2, Bell, Loader2
 } from 'lucide-react';
 import { Project, Member, LayoutMode, Quarter } from './types';
 import { INITIAL_MEMBERS, MEMBER_COLORS, BENTO_CARD_STYLE, RADIUS_CLASS, BENTO_CARD_HOVER, CANVAS_CENTER_X, CANVAS_CENTER_Y, CANVAS_RADIUS_L1, CANVAS_RADIUS_L2_OFFSET } from './constants';
@@ -185,7 +185,7 @@ import MemberPanel from './components/Member/MemberPanel';
 import ProjectDetail from './components/Project/ProjectDetail';
 import StrategyDetail from './components/Strategy/StrategyDetail';
 
-// Helper to sanitize imported data to avoid crashes (White Screen of Death)
+// Helper to sanitize imported data to avoid crashes
 const sanitizeProjectData = (projects: any[]): Project[] => {
   if (!Array.isArray(projects)) return [];
   
@@ -219,6 +219,7 @@ const sanitizeProjectData = (projects: any[]): Project[] => {
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [loading, setLoading] = useState(true); // Loading state for async data
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [showStrategyDetail, setShowStrategyDetail] = useState(false);
   const [hubTitle, setHubTitle] = useState("2026 Strategy Hub");
@@ -240,59 +241,73 @@ export default function App() {
   const [isPanning, setIsPanning] = useState(false);
   const panStartRef = useRef<{x: number, y: number} | null>(null);
 
+  // Initial Data Subscription (Firebase)
   useEffect(() => {
-    const loadedProjects = DataService.loadProjects();
-    const loadedMembers = DataService.loadMembers();
-    if (loadedProjects) setProjects(sanitizeProjectData(loadedProjects));
-    if (loadedMembers && loadedMembers.length > 0) setMembers(loadedMembers);
-    DataService.onSync((type, data) => {
-      if (type === 'PROJECTS_UPDATED') setProjects(sanitizeProjectData(data));
-      if (type === 'MEMBERS_UPDATED') setMembers(data);
+    setLoading(true);
+    
+    const unsubscribeProjects = DataService.subscribeProjects((data) => {
+      setProjects(sanitizeProjectData(data));
+      setLoading(false);
     });
+
+    const unsubscribeMembers = DataService.subscribeMembers((data) => {
+      setMembers(data);
+    });
+
+    // Cleanup listeners on unmount
+    return () => {
+      unsubscribeProjects();
+      unsubscribeMembers();
+    };
   }, []);
 
-  useEffect(() => { DataService.saveProjects(projects); }, [projects]);
-  useEffect(() => { DataService.saveMembers(members); }, [members]);
+  // Handlers now only update local state optimistically or trigger DataService saving.
+  // Actually, since we use real-time listeners, we just call save and let the listener update the state.
+  // But for smoother UX, we can optimistically update state then save. 
+  // However, with Firebase's speed, direct save -> listener update is usually fine and prevents conflicts.
+  // To keep it simple and robust (avoid out-of-sync), we will push to DB and let the subscription update the UI.
+
+  const saveProjectsToCloud = useCallback((newProjects: Project[]) => {
+    // Optimistic update for UI responsiveness
+    setProjects(newProjects);
+    // Persist to Cloud
+    DataService.saveProjects(newProjects);
+  }, []);
+
+  const saveMembersToCloud = useCallback((newMembers: Member[]) => {
+    setMembers(newMembers);
+    DataService.saveMembers(newMembers);
+  }, []);
 
   // --- Handlers ---
 
-  // 1. Node Dragging
   const handleMouseDown = (e: React.MouseEvent, id: string, currentX: number, currentY: number) => {
     if (layoutMode !== 'radial') return;
     e.stopPropagation(); 
-    e.preventDefault(); // FIX: Prevents text selection while dragging pins
-    
+    e.preventDefault();
     setDraggingId(id);
     dragStartRef.current = { x: e.clientX, y: e.clientY };
     nodeStartRef.current = { x: currentX, y: currentY };
   };
 
-  // 2. Background Panning
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     if (layoutMode !== 'radial') return;
-    // Only pan if clicking on the background (not if interacting with UI)
-    // The visual elements stopPropagation, so if we get here, it's safe.
-    e.preventDefault(); // Prevent default browser drag behaviors
+    e.preventDefault();
     setIsPanning(true);
     panStartRef.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
   };
 
-  // 3. Global Mouse Move
   const handleMouseMove = useCallback((e: MouseEvent) => {
-    // Handle Node Dragging
     if (draggingId && dragStartRef.current && nodeStartRef.current) {
       const deltaX = (e.clientX - dragStartRef.current.x) / zoom;
       const deltaY = (e.clientY - dragStartRef.current.y) / zoom;
       const startX = nodeStartRef.current.x;
       const startY = nodeStartRef.current.y;
-
       setNodePositions(prev => ({
         ...prev,
         [draggingId]: { x: startX + deltaX, y: startY + deltaY }
       }));
     }
-
-    // Handle Canvas Panning
     if (isPanning && panStartRef.current) {
       setPanOffset({
         x: e.clientX - panStartRef.current.x,
@@ -301,12 +316,10 @@ export default function App() {
     }
   }, [draggingId, isPanning, zoom]);
 
-  // 4. Global Mouse Up
   const handleMouseUp = useCallback(() => {
     setDraggingId(null);
     dragStartRef.current = null;
     nodeStartRef.current = null;
-    
     setIsPanning(false);
     panStartRef.current = null;
   }, []);
@@ -322,17 +335,17 @@ export default function App() {
     };
   }, [draggingId, isPanning, handleMouseMove, handleMouseUp]);
 
-  // Project Management Actions (deleteProject, addProject, etc. - kept same)
+  // Project Management Actions
   const deleteProject = useCallback((id: string) => {
     setConfirmState({
       isOpen: true, title: '刪除業務項目', message: '確定要永久刪除此業務項目嗎？',
       onConfirm: () => {
         const recursiveDelete = (list: Project[]): Project[] => list.filter(p => p.id !== id).map(p => ({ ...p, subProjects: p.subProjects ? recursiveDelete(p.subProjects) : [] }));
-        setProjects(prev => recursiveDelete([...prev]));
+        saveProjectsToCloud(recursiveDelete([...projects]));
         setSelectedProjectId(null); setConfirmState(null);
       }
     });
-  }, []);
+  }, [projects, saveProjectsToCloud]);
 
   const addProject = useCallback(() => {
     const emptyQ = (id: string) => ({ id, objective: '', budget: 0, spent: 0, kpis: [], tasks: [] });
@@ -342,9 +355,9 @@ export default function App() {
       quarters: { q1: emptyQ('q1'), q2: emptyQ('q2'), q3: emptyQ('q3'), q4: emptyQ('q4') },
       subProjects: []
     };
-    setProjects(prev => [...prev, newP]);
+    saveProjectsToCloud([...projects, newP]);
     setSelectedProjectId(newId);
-  }, []);
+  }, [projects, saveProjectsToCloud]);
 
   const addSubProject = useCallback((parentId: string) => {
     let canAdd = true;
@@ -352,9 +365,7 @@ export default function App() {
       list.forEach(p => {
         if (p.id === parentId) {
           if ((p.subProjects?.length || 0) >= 5) { canAdd = false; }
-        } else if (p.subProjects) {
-          checkLimit(p.subProjects);
-        }
+        } else if (p.subProjects) checkLimit(p.subProjects);
       });
     }
     checkLimit(projects);
@@ -376,9 +387,9 @@ export default function App() {
       if (p.subProjects) return { ...p, subProjects: recursiveAdd(p.subProjects) };
       return p;
     });
-    setProjects(prev => recursiveAdd([...prev]));
+    saveProjectsToCloud(recursiveAdd([...projects]));
     setSelectedProjectId(newId);
-  }, [projects]);
+  }, [projects, saveProjectsToCloud]);
 
   const updateProjectProperty = useCallback((pid: string, field: keyof Project, value: any) => {
     const recursiveUpdate = (list: Project[]): Project[] => list.map(p => {
@@ -386,8 +397,8 @@ export default function App() {
       if (p.subProjects) return { ...p, subProjects: recursiveUpdate(p.subProjects) };
       return p;
     });
-    setProjects(prev => recursiveUpdate([...prev]));
-  }, []);
+    saveProjectsToCloud(recursiveUpdate([...projects]));
+  }, [projects, saveProjectsToCloud]);
 
   const updateQuarterData = useCallback((pid: string, qid: keyof Project['quarters'], field: keyof Quarter, value: any) => {
     const recursiveUpdate = (list: Project[]): Project[] => list.map(p => {
@@ -395,8 +406,8 @@ export default function App() {
       if (p.subProjects) return { ...p, subProjects: recursiveUpdate(p.subProjects) };
       return p;
     });
-    setProjects(prev => recursiveUpdate([...prev]));
-  }, []);
+    saveProjectsToCloud(recursiveUpdate([...projects]));
+  }, [projects, saveProjectsToCloud]);
   
   const deleteTask = useCallback((pid: string, qid: string, tid: string) => {
       const recursiveDelete = (list: Project[]): Project[] => list.map(p => {
@@ -407,8 +418,8 @@ export default function App() {
         if (p.subProjects) return { ...p, subProjects: recursiveDelete(p.subProjects) };
         return p;
       });
-      setProjects(prev => recursiveDelete([...prev]));
-  }, []);
+      saveProjectsToCloud(recursiveDelete([...projects]));
+  }, [projects, saveProjectsToCloud]);
 
   const deleteKpi = useCallback((pid: string, qid: string, kid: string) => {
       const recursiveDelete = (list: Project[]): Project[] => list.map(p => {
@@ -419,8 +430,8 @@ export default function App() {
         if (p.subProjects) return { ...p, subProjects: recursiveDelete(p.subProjects) };
         return p;
       });
-      setProjects(prev => recursiveDelete([...prev]));
-  }, []);
+      saveProjectsToCloud(recursiveDelete([...projects]));
+  }, [projects, saveProjectsToCloud]);
 
   const globalStats = useMemo(() => {
     let weightedKpi = 0, weightedProgress = 0, totalWeight = 0;
@@ -437,15 +448,13 @@ export default function App() {
 
   const filteredProjects = useMemo(() => projects.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase())), [projects, searchQuery]);
 
-  // --- Rendering ---
-
   // Shared Card Content
   const renderCardContent = (p: Project, s: any, urgent: any, level: number, i: number, onMouseDown: (e: React.MouseEvent) => void) => (
     <div className="h-full flex flex-col relative pt-4">
       {/* DRAG HANDLE (PIN) */}
       <div 
         onMouseDown={onMouseDown}
-        onClick={(e) => e.stopPropagation()} // CRITICAL: Stop propagation to prevent card open
+        onClick={(e) => e.stopPropagation()} 
         className="absolute -top-10 left-1/2 -translate-x-1/2 cursor-grab active:cursor-grabbing hover:scale-110 transition-transform z-50"
         title="Drag to move"
       >
@@ -465,7 +474,6 @@ export default function App() {
       
       <h3 className="font-bold text-[15px] mb-2 leading-tight text-black">{p.name}</h3>
       
-      {/* Quarterly Objective Display */}
       <div className="mb-4 text-[10px] text-gray-500 line-clamp-2 bg-gray-50 p-2 rounded-lg italic border border-dashed border-gray-200">
          <span className="font-bold text-gray-400 not-italic uppercase mr-1">Q1 Goal:</span>
          {p.quarters.q1.objective || "未設定季度目標..."}
@@ -486,13 +494,14 @@ export default function App() {
     </div>
   );
 
-  // Layout Logic: Generate separated Paths and Cards to ensure proper SVG layering
+  // Layout Logic... (Same as before, simplified for brevity in this view, logic remains inside component)
+  const centerPos = nodePositions['root'] || { x: CANVAS_CENTER_X, y: CANVAS_CENTER_Y };
+  
   const generateGraphElements = (list: Project[], parentX: number, parentY: number, level: number) => {
       let paths: React.ReactNode[] = [];
       let cards: React.ReactNode[] = [];
 
       list.forEach((p, i) => {
-          // 1. Calculate Position
           let defaultX, defaultY, angle;
           if (level === 1) {
              const count = list.length;
@@ -509,46 +518,44 @@ export default function App() {
              defaultX = parentX + CANVAS_RADIUS_L2_OFFSET * Math.cos(angle);
              defaultY = parentY + CANVAS_RADIUS_L2_OFFSET * Math.sin(angle);
           }
-
           const pos = nodePositions[p.id] || { x: defaultX, y: defaultY };
-          const x = pos.x;
-          const y = pos.y;
           const s = calculateAnnualStats(p);
           const urgent = getMostUrgentTask(p);
 
-          // 2. Add Path
-          paths.push(
-            <path 
-                key={`path-${p.id}`}
-                d={`M ${parentX} ${parentY} L ${x} ${y}`} 
-                className="node-connection"
-            />
-          );
-
-          // 3. Add Card
+          paths.push(<path key={`path-${p.id}`} d={`M ${parentX} ${parentY} L ${pos.x} ${pos.y}`} className="node-connection"/>);
           cards.push(
-            <div key={`card-${p.id}`} className="absolute z-20 w-72 group transition-shadow duration-300" style={{ left: x, top: y, transform: 'translate(-50%, -12px)' }}>
-                <div 
-                    onClick={() => setSelectedProjectId(p.id)} 
-                    className={`${BENTO_CARD_STYLE} ${BENTO_CARD_HOVER} p-5 relative group/card h-full cursor-pointer`}
-                >
+            <div key={`card-${p.id}`} className="absolute z-20 w-72 group transition-shadow duration-300" style={{ left: pos.x, top: pos.y, transform: 'translate(-50%, -12px)' }}>
+                <div onClick={() => setSelectedProjectId(p.id)} className={`${BENTO_CARD_STYLE} ${BENTO_CARD_HOVER} p-5 relative group/card h-full cursor-pointer`}>
                     {urgent && <TaskNotificationBubble task={urgent} />}
-                    {renderCardContent(p, s, urgent, level, i, (e) => handleMouseDown(e, p.id, x, y))}
+                    {renderCardContent(p, s, urgent, level, i, (e) => handleMouseDown(e, p.id, pos.x, pos.y))}
                 </div>
             </div>
           );
-
-          // 4. Recursion
           if (p.subProjects && p.subProjects.length > 0) {
-              const children = generateGraphElements(p.subProjects, x, y, level + 1);
+              const children = generateGraphElements(p.subProjects, pos.x, pos.y, level + 1);
               paths = [...paths, ...children.paths];
               cards = [...cards, ...children.cards];
           }
       });
-
       return { paths, cards };
   };
 
+  const graphData = useMemo(() => {
+     if (layoutMode === 'radial') return generateGraphElements(filteredProjects, centerPos.x, centerPos.y, 1);
+     return { paths: [], cards: [] };
+  }, [filteredProjects, centerPos, layoutMode, nodePositions]); 
+
+  // Loading Screen
+  if (loading) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-[#f8f8f8] flex-col gap-4">
+        <Loader2 className="animate-spin text-black" size={48} />
+        <p className="text-gray-400 font-bold text-sm tracking-widest uppercase">Syncing with Cloud Database...</p>
+      </div>
+    );
+  }
+
+  // Horizontal Mode Layout (Extracted for cleaner return)
   const horizontalElements = () => (
     <div className="flex gap-12 px-20 py-20 items-start min-w-full">
       {filteredProjects.map((p, i) => {
@@ -556,19 +563,12 @@ export default function App() {
         const urgent = getMostUrgentTask(p);
         return (
           <div key={p.id} className="relative flex flex-col items-center group">
-             {/* Main Card */}
              <div onClick={() => setSelectedProjectId(p.id)} className={`${BENTO_CARD_STYLE} ${BENTO_CARD_HOVER} w-80 p-6 relative group/card cursor-pointer shrink-0 z-10 pt-8`}>
-                <div className="absolute -top-5 left-1/2 -translate-x-1/2 z-20">
-                   <BlackPin />
-                </div>
+                <div className="absolute -top-5 left-1/2 -translate-x-1/2 z-20"><BlackPin /></div>
                 {urgent && <TaskNotificationBubble task={urgent} />}
                 {renderCardContent(p, s, urgent, 1, i, () => {})}
              </div>
-
-             {p.subProjects && p.subProjects.length > 0 && (
-                <div className="h-8 w-px bg-gray-200 my-0"></div>
-             )}
-
+             {p.subProjects && p.subProjects.length > 0 && <div className="h-8 w-px bg-gray-200 my-0"></div>}
              {p.subProjects && p.subProjects.length > 0 && (
                <div className="flex flex-col items-center relative gap-4">
                      {p.subProjects.map((sub, j) => {
@@ -596,40 +596,18 @@ export default function App() {
     </div>
   );
 
-  // Central Hub Draggable Position
-  const centerPos = nodePositions['root'] || { x: CANVAS_CENTER_X, y: CANVAS_CENTER_Y };
-  
-  // Calculate Radial Graph (Paths + Cards)
-  const graphData = useMemo(() => {
-     if (layoutMode === 'radial') {
-        return generateGraphElements(filteredProjects, centerPos.x, centerPos.y, 1);
-     }
-     return { paths: [], cards: [] };
-  }, [filteredProjects, centerPos, layoutMode, nodePositions]); 
-
   return (
     <div className="flex h-screen w-full text-black overflow-hidden relative selection:bg-[#eaff00] selection:text-black">
-      {/* Background Layers managed by React for Panning Sync */}
-      <div 
-        className="bg-grid absolute inset-0 w-full h-full pointer-events-none" 
-        style={{ 
-          backgroundPosition: `${panOffset.x}px ${panOffset.y}px`,
-        }} 
-      />
+      <div className="bg-grid absolute inset-0 w-full h-full pointer-events-none" style={{ backgroundPosition: `${panOffset.x}px ${panOffset.y}px` }} />
       <div className="bg-noise absolute inset-0 w-full h-full pointer-events-none" />
 
       <input type="file" ref={importInputRef} onChange={(e) => {
          const file = e.target.files?.[0];
          if(file) DataService.importData(file).then(({projects, members}) => { 
-             // Sanitize data before setting state to prevent white screen crashes
-             const sanitizedProjects = sanitizeProjectData(projects);
-             setProjects(sanitizedProjects); 
-             setMembers(members); 
-             setNodePositions({}); // Reset positions
-             setPanOffset({x: 0, y: 0}); // Reset pan
+             setPanOffset({x: 0, y: 0});
+             setNodePositions({});
          }).catch(err => {
-             alert("匯入失敗：檔案格式錯誤或損毀。");
-             console.error(err);
+             alert("匯入失敗：" + err.message);
          });
       }} accept=".json" className="hidden" />
 
@@ -647,21 +625,18 @@ export default function App() {
            <button onClick={() => setLayoutMode('radial')} className={`p-3 rounded-xl transition-all ${layoutMode === 'radial' ? 'bg-black text-[#eaff00] shadow-md' : 'hover:bg-gray-50 text-gray-400'}`}><Network size={18} /></button>
            <button onClick={() => setLayoutMode('horizontal')} className={`p-3 rounded-xl transition-all ${layoutMode === 'horizontal' ? 'bg-black text-[#eaff00] shadow-md' : 'hover:bg-gray-50 text-gray-400'}`}><GalleryHorizontal size={18} /></button>
         </div>
-
         <div className="pointer-events-auto flex-1 max-w-lg mx-6 bg-white border border-gray-100 p-1.5 rounded-2xl relative shadow-lg flex items-center">
           <Search size={16} className="absolute left-5 text-gray-300" />
           <input placeholder="Search..." className="w-full bg-transparent border-none py-2.5 pl-12 pr-4 text-sm font-medium focus:outline-none placeholder:text-gray-300" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
         </div>
-
         <div className="flex items-center gap-3 pointer-events-auto">
-           <button onClick={() => importInputRef.current?.click()} className="btn-frosted w-12 h-12 rounded-2xl flex items-center justify-center text-gray-600"><Upload size={20} /></button>
+           <button onClick={() => importInputRef.current?.click()} className="btn-frosted w-12 h-12 rounded-2xl flex items-center justify-center text-gray-600" title="Import & Sync"><Upload size={20} /></button>
            <button onClick={() => DataService.exportData(projects, members)} className="btn-frosted w-12 h-12 rounded-2xl flex items-center justify-center text-gray-600"><Download size={20} /></button>
            <button onClick={addProject} className="w-12 h-12 rounded-2xl flex items-center justify-center bg-[#eaff00] text-black shadow-lg hover:scale-105 active:scale-95 transition-all"><Plus size={24} /></button>
         </div>
       </div>
 
       <div className="flex-1 relative overflow-hidden h-full">
-        {/* Main Canvas Container - Handles Panning & Zooming */}
         {layoutMode === 'radial' ? (
              <div 
                 onMouseDown={handleCanvasMouseDown}
@@ -676,7 +651,6 @@ export default function App() {
                     }}
                  >
                     <div className="relative w-full h-full">
-                        {/* Center Hub */}
                         <div 
                           onClick={() => setShowStrategyDetail(true)}
                           className="absolute z-10 w-[340px] h-[340px] bg-white shadow-2xl rounded-full flex flex-col items-center justify-center text-center border border-gray-100 cursor-pointer group hover:scale-105 transition-transform"
@@ -689,15 +663,12 @@ export default function App() {
                            >
                              <BlackPin />
                            </div>
-
                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                               <DoubleCircularProgress innerValue={globalStats.kpi} outerValue={globalStats.prog} size={280} strokeWidth={8} />
                            </div>
-
                            <div className="relative z-10 flex flex-col items-center">
                               <div className="text-[10px] font-black text-gray-300 uppercase tracking-[0.2em] mb-1">TOTAL PERFORMANCE</div>
                               <div className="text-3xl font-black leading-none text-black tracking-tight mb-4 max-w-[200px] truncate px-4">{hubTitle}</div>
-                              
                               <div className="flex gap-6 mt-2">
                                 <div className="text-center">
                                    <div className="text-[9px] font-bold text-gray-400 uppercase">KPI Health</div>
@@ -711,29 +682,19 @@ export default function App() {
                               </div>
                            </div>
                         </div>
-                        
-                        {/* Paths Layer */}
-                        <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
-                          {graphData.paths}
-                        </svg>
-
-                        {/* Cards Layer */}
+                        <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">{graphData.paths}</svg>
                         {graphData.cards}
                     </div>
                  </div>
              </div>
         ) : (
-             <div 
-                className="w-full h-full transition-transform duration-75 ease-out origin-top-left"
-                style={{ transform: `scale(${zoom})` }}
-             >
+             <div className="w-full h-full transition-transform duration-75 ease-out origin-top-left" style={{ transform: `scale(${zoom})` }}>
                  <div className="w-full h-full overflow-x-auto overflow-y-hidden whitespace-nowrap custom-scrollbar pt-10 pl-10">
                     {horizontalElements()}
                  </div>
              </div>
         )}
 
-        {/* Zoom Controls - MOVED TO BOTTOM RIGHT to avoid overlapping with Calendar */}
         <div className="absolute bottom-10 right-10 z-30 flex flex-col gap-2">
            <button onClick={() => setZoom(z => Math.min(z + 0.1, 4.0))} className="w-10 h-10 bg-white rounded-xl shadow-lg border border-gray-100 flex items-center justify-center text-gray-600 hover:bg-gray-50"><Plus size={18}/></button>
            <button onClick={() => setZoom(z => Math.max(z - 0.1, 0.15))} className="w-10 h-10 bg-white rounded-xl shadow-lg border border-gray-100 flex items-center justify-center text-gray-600 hover:bg-gray-50"><MoreHorizontal size={18}/></button>
@@ -742,26 +703,19 @@ export default function App() {
 
         <WeeklyStripCalendar projects={projects} members={members} onAddTask={(pid, qid, t) => {
             const recursiveAdd = (list: Project[]) => list.forEach(p => { if (p.id === pid) p.quarters[qid as keyof typeof p.quarters].tasks.push({ ...t, id: Date.now().toString() } as any); else if (p.subProjects) recursiveAdd(p.subProjects); });
-            setProjects(prev => { const next = JSON.parse(JSON.stringify(prev)); recursiveAdd(next); return next; });
+            const next = JSON.parse(JSON.stringify(projects)); 
+            recursiveAdd(next);
+            saveProjectsToCloud(next);
           }} onUpdateTask={(pid, qid, tid, f, v) => {
             const recursiveUpdate = (list: Project[]) => list.forEach(p => { if (p.id === pid) { const q = p.quarters[qid as keyof typeof p.quarters]; q.tasks = q.tasks.map(t => t.id === tid ? { ...t, [f]: v } : t); } else if (p.subProjects) recursiveUpdate(p.subProjects); });
-            setProjects(prev => { const next = JSON.parse(JSON.stringify(prev)); recursiveUpdate(next); return next; });
+            const next = JSON.parse(JSON.stringify(projects));
+            recursiveUpdate(next);
+            saveProjectsToCloud(next);
           }} onDeleteTask={deleteTask} />
       </div>
 
-      {!selectedProjectId && <MemberPanel members={members} projects={projects} onAddMember={(name) => setMembers([...members, { id: Date.now().toString(), name, color: MEMBER_COLORS[members.length % MEMBER_COLORS.length] }])} onDeleteMember={(id) => setMembers(prev => prev.filter(m => m.id !== id))} />}
-
-      {/* Strategy Detail Side Panel */}
-      {showStrategyDetail && (
-         <StrategyDetail 
-            projects={projects} 
-            title={hubTitle}
-            onUpdateTitle={setHubTitle}
-            onUpdateProjectWeight={(id, weight) => updateProjectProperty(id, 'weight', weight)}
-            onClose={() => setShowStrategyDetail(false)} 
-         />
-      )}
-
+      {!selectedProjectId && <MemberPanel members={members} projects={projects} onAddMember={(name) => saveMembersToCloud([...members, { id: Date.now().toString(), name, color: MEMBER_COLORS[members.length % MEMBER_COLORS.length] }])} onDeleteMember={(id) => saveMembersToCloud(members.filter(m => m.id !== id))} />}
+      {showStrategyDetail && <StrategyDetail projects={projects} title={hubTitle} onUpdateTitle={setHubTitle} onUpdateProjectWeight={(id, weight) => updateProjectProperty(id, 'weight', weight)} onClose={() => setShowStrategyDetail(false)} />}
       {(() => {
         const findSelected = (list: Project[]): Project | null => {
           for (const p of list) { if (p.id === selectedProjectId) return p; if (p.subProjects) { const sub = findSelected(p.subProjects); if (sub) return sub; } }

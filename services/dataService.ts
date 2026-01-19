@@ -1,47 +1,57 @@
 
 import { Project, Member } from '../types';
 import { INITIAL_MEMBERS } from '../constants';
+import { database } from '../src/firebase';
+import { ref, onValue, set, get, child } from "firebase/database";
 
-const STORAGE_KEY_PROJECTS = 'mindmap-projects-v2026';
-const STORAGE_KEY_MEMBERS = 'mindmap-members-v2026';
-const SYNC_CHANNEL = 'business-plan-sync';
-
-const channel = new BroadcastChannel(SYNC_CHANNEL);
+const DB_PROJECTS_PATH = 'mindmap/projects';
+const DB_MEMBERS_PATH = 'mindmap/members';
 
 export const DataService = {
-  loadProjects: (): Project[] | null => {
+  // Subscribe to real-time updates for projects
+  subscribeProjects: (callback: (data: Project[]) => void) => {
+    const projectsRef = ref(database, DB_PROJECTS_PATH);
+    const unsubscribe = onValue(projectsRef, (snapshot) => {
+      const data = snapshot.val();
+      callback(data || []); // If null (empty DB), return empty array
+    });
+    return unsubscribe; // Return cleanup function
+  },
+
+  // Subscribe to real-time updates for members
+  subscribeMembers: (callback: (data: Member[]) => void) => {
+    const membersRef = ref(database, DB_MEMBERS_PATH);
+    const unsubscribe = onValue(membersRef, (snapshot) => {
+      const data = snapshot.val();
+      callback(data || INITIAL_MEMBERS);
+    });
+    return unsubscribe;
+  },
+
+  // Save projects to Cloud
+  saveProjects: async (projects: Project[]) => {
     try {
-      const data = localStorage.getItem(STORAGE_KEY_PROJECTS);
-      return data ? JSON.parse(data) : null;
+      await set(ref(database, DB_PROJECTS_PATH), projects);
     } catch (e) {
-      return null;
+      console.error("Error saving projects to Firebase:", e);
     }
   },
-  saveProjects: (projects: Project[], silent = false) => {
-    localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(projects));
-    if (!silent) {
-      channel.postMessage({ type: 'PROJECTS_UPDATED', data: projects });
-    }
-  },
-  loadMembers: (): Member[] => {
+
+  // Save members to Cloud
+  saveMembers: async (members: Member[]) => {
     try {
-      const data = localStorage.getItem(STORAGE_KEY_MEMBERS);
-      return data ? JSON.parse(data) : INITIAL_MEMBERS;
+      await set(ref(database, DB_MEMBERS_PATH), members);
     } catch (e) {
-      return INITIAL_MEMBERS;
+      console.error("Error saving members to Firebase:", e);
     }
   },
-  saveMembers: (members: Member[], silent = false) => {
-    localStorage.setItem(STORAGE_KEY_MEMBERS, JSON.stringify(members));
-    if (!silent) {
-      channel.postMessage({ type: 'MEMBERS_UPDATED', data: members });
-    }
-  },
+
+  // Deprecated: legacy sync listener (kept empty to avoid breaking calling code if any)
   onSync: (callback: (type: string, data: any) => void) => {
-    channel.onmessage = (event) => {
-      callback(event.data.type, event.data.data);
-    };
+    // Firebase onValue handles sync now.
   },
+
+  // Export local JSON (still useful for backups)
   exportData: (projects: Project[], members: Member[]) => {
     const dataStr = JSON.stringify({ projects, members }, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });
@@ -53,14 +63,19 @@ export const DataService = {
     link.click();
     document.body.removeChild(link);
   },
+
+  // Import JSON to Cloud
   importData: (file: File): Promise<{ projects: Project[], members: Member[] }> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         try {
           const content = e.target?.result as string;
           const data = JSON.parse(content);
           if (data && data.projects && data.members) {
+            // Upon import, immediately save to Cloud to update everyone
+            await set(ref(database, DB_PROJECTS_PATH), data.projects);
+            await set(ref(database, DB_MEMBERS_PATH), data.members);
             resolve(data);
           } else {
             reject(new Error("無效的檔案格式：缺少業務項目或成員數據。"));
