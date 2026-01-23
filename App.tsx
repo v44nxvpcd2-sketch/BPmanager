@@ -4,7 +4,8 @@ import {
   Plus, Target, Network, GalleryHorizontal, 
   User, Users, ChevronLeft, ChevronRight, X, LayoutGrid, 
   Trash2, AlertCircle, MoreHorizontal, Search, Filter, ArrowUp, Download, Upload,
-  GitBranch, CheckCircle2, Clock, Info, Activity, GripHorizontal, Pin, Settings2, Bell, Loader2
+  GitBranch, CheckCircle2, Clock, Info, Activity, GripHorizontal, Pin, Settings2, Bell, Loader2,
+  DollarSign // Added Icon
 } from 'lucide-react';
 import { Project, Member, LayoutMode, Quarter } from './types';
 import { INITIAL_MEMBERS, MEMBER_COLORS, BENTO_CARD_STYLE, RADIUS_CLASS, BENTO_CARD_HOVER, CANVAS_CENTER_X, CANVAS_CENTER_Y, CANVAS_RADIUS_L1, CANVAS_RADIUS_L2_OFFSET } from './constants';
@@ -184,6 +185,7 @@ import WeeklyStripCalendar from './components/Calendar/WeeklyStripCalendar';
 import MemberPanel from './components/Member/MemberPanel';
 import ProjectDetail from './components/Project/ProjectDetail';
 import StrategyDetail from './components/Strategy/StrategyDetail';
+import FinanceDashboard from './components/Finance/FinanceDashboard';
 
 // Helper to sanitize imported data to avoid crashes
 const sanitizeProjectData = (projects: any[]): Project[] => {
@@ -196,6 +198,7 @@ const sanitizeProjectData = (projects: any[]): Project[] => {
     spent: typeof q?.spent === 'number' ? q.spent : 0,
     kpis: Array.isArray(q?.kpis) ? q.kpis : [],
     tasks: Array.isArray(q?.tasks) ? q.tasks : [],
+    transactions: Array.isArray(q?.transactions) ? q.transactions : [], // Sanitize transactions
   });
 
   const sanitizeRecursive = (p: any): Project => ({
@@ -222,6 +225,7 @@ export default function App() {
   const [loading, setLoading] = useState(true); // Loading state for async data
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [showStrategyDetail, setShowStrategyDetail] = useState(false);
+  const [showFinanceDashboard, setShowFinanceDashboard] = useState(false); // New state for Finance Dashboard
   const [hubTitle, setHubTitle] = useState("2026 Strategy Hub");
   
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('radial');
@@ -261,16 +265,8 @@ export default function App() {
     };
   }, []);
 
-  // Handlers now only update local state optimistically or trigger DataService saving.
-  // Actually, since we use real-time listeners, we just call save and let the listener update the state.
-  // But for smoother UX, we can optimistically update state then save. 
-  // However, with Firebase's speed, direct save -> listener update is usually fine and prevents conflicts.
-  // To keep it simple and robust (avoid out-of-sync), we will push to DB and let the subscription update the UI.
-
   const saveProjectsToCloud = useCallback((newProjects: Project[]) => {
-    // Optimistic update for UI responsiveness
     setProjects(newProjects);
-    // Persist to Cloud
     DataService.saveProjects(newProjects);
   }, []);
 
@@ -348,7 +344,7 @@ export default function App() {
   }, [projects, saveProjectsToCloud]);
 
   const addProject = useCallback(() => {
-    const emptyQ = (id: string) => ({ id, objective: '', budget: 0, spent: 0, kpis: [], tasks: [] });
+    const emptyQ = (id: string) => ({ id, objective: '', budget: 0, spent: 0, kpis: [], tasks: [], transactions: [] });
     const newId = Date.now().toString();
     const newP: Project = {
       id: newId, name: '新業務項目', owner: null, annualObjective: '', weight: 1,
@@ -375,7 +371,7 @@ export default function App() {
       return;
     }
 
-    const emptyQ = (id: string) => ({ id, objective: '', budget: 0, spent: 0, kpis: [], tasks: [] });
+    const emptyQ = (id: string) => ({ id, objective: '', budget: 0, spent: 0, kpis: [], tasks: [], transactions: [] });
     const newId = Date.now().toString();
     const newSub: Project = {
       id: newId, name: '新子項目', owner: null, annualObjective: '', weight: 1,
@@ -472,7 +468,8 @@ export default function App() {
         </div>
       </div>
       
-      <h3 className="font-bold text-[15px] mb-2 leading-tight text-black">{p.name}</h3>
+      {/* UPDATE: Added line-clamp and overflow handling for title */}
+      <h3 className="font-bold text-[15px] mb-2 leading-tight text-black line-clamp-2 overflow-hidden text-ellipsis h-[2.5em]">{p.name}</h3>
       
       <div className="mb-4 text-[10px] text-gray-500 line-clamp-2 bg-gray-50 p-2 rounded-lg italic border border-dashed border-gray-200">
          <span className="font-bold text-gray-400 not-italic uppercase mr-1">Q1 Goal:</span>
@@ -622,6 +619,9 @@ export default function App() {
       {/* Header / Toolbar */}
       <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-6xl px-8 flex items-center justify-between pointer-events-none">
         <div className="bg-white shadow-xl border border-gray-100 rounded-2xl p-1.5 flex items-center gap-1 pointer-events-auto">
+           {/* Added Finance Dashboard Toggle Button */}
+           <button onClick={() => setShowFinanceDashboard(true)} className={`p-3 rounded-xl transition-all ${showFinanceDashboard ? 'bg-black text-[#eaff00] shadow-md' : 'hover:bg-gray-50 text-gray-400'}`} title="Finance & Personnel"><DollarSign size={18} /></button>
+           <div className="w-px h-6 bg-gray-100 mx-1"></div>
            <button onClick={() => setLayoutMode('radial')} className={`p-3 rounded-xl transition-all ${layoutMode === 'radial' ? 'bg-black text-[#eaff00] shadow-md' : 'hover:bg-gray-50 text-gray-400'}`}><Network size={18} /></button>
            <button onClick={() => setLayoutMode('horizontal')} className={`p-3 rounded-xl transition-all ${layoutMode === 'horizontal' ? 'bg-black text-[#eaff00] shadow-md' : 'hover:bg-gray-50 text-gray-400'}`}><GalleryHorizontal size={18} /></button>
         </div>
@@ -716,6 +716,7 @@ export default function App() {
 
       {!selectedProjectId && <MemberPanel members={members} projects={projects} onAddMember={(name) => saveMembersToCloud([...members, { id: Date.now().toString(), name, color: MEMBER_COLORS[members.length % MEMBER_COLORS.length] }])} onDeleteMember={(id) => saveMembersToCloud(members.filter(m => m.id !== id))} />}
       {showStrategyDetail && <StrategyDetail projects={projects} title={hubTitle} onUpdateTitle={setHubTitle} onUpdateProjectWeight={(id, weight) => updateProjectProperty(id, 'weight', weight)} onClose={() => setShowStrategyDetail(false)} />}
+      {showFinanceDashboard && <FinanceDashboard projects={projects} members={members} onClose={() => setShowFinanceDashboard(false)} onUpdateQuarter={updateQuarterData} onSaveProjects={saveProjectsToCloud} />}
       {(() => {
         const findSelected = (list: Project[]): Project | null => {
           for (const p of list) { if (p.id === selectedProjectId) return p; if (p.subProjects) { const sub = findSelected(p.subProjects); if (sub) return sub; } }

@@ -24,6 +24,17 @@ export interface Task {
   quarterId?: string;
 }
 
+export type TransactionType = 'income' | 'expense' | 'salary' | 'tax';
+
+export interface Transaction {
+  id: string;
+  type: TransactionType;
+  amount: number;
+  description: string;
+  date: string;
+  memberId?: string; // Optional: link salary to a member
+}
+
 export interface Quarter {
   id: string;
   objective: string;
@@ -31,6 +42,7 @@ export interface Quarter {
   spent: number;
   kpis: KPI[];
   tasks: Task[];
+  transactions?: Transaction[]; // New field for detailed financials
 }
 
 export interface Project {
