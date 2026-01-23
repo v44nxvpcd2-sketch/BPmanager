@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { X, Target, Trash2, ChevronDown, ChevronRight, TrendingUp, ListTodo, Plus, CheckCircle, Circle, Calendar as CalendarIcon, Percent, GitBranch, ArrowRight, AlertCircle, Clock, User } from 'lucide-react';
+import { X, Target, Trash2, ChevronDown, ChevronRight, TrendingUp, ListTodo, Plus, CheckCircle, Circle, Calendar as CalendarIcon, Percent, GitBranch, ArrowRight, AlertCircle, User } from 'lucide-react';
 import { Project, Member, Quarter } from '../../types';
 import { RADIUS_CLASS } from '../../constants';
 import { calculateAnnualStats, calculateQuarterStats, getTaskStatus } from '../../utils';
@@ -10,10 +10,11 @@ interface ProjectDetailProps {
   members: Member[];
   onClose: () => void;
   onUpdateProject: (pid: string, field: keyof Project, val: any) => void;
-  onUpdateQuarter: (pid: string, qid: keyof Project['quarters'], field: keyof Quarter, val: any) => void;
+  // Fix: Changed qid type from keyof Project['quarters'] to string to match App.tsx signature
+  onUpdateQuarter: (pid: string, qid: string, field: keyof Quarter, val: any) => void;
   onDeleteProject: (pid: string) => void;
   onDeleteTask: (pid: string, qid: string, tid: string) => void;
-  deleteKpi: (pid: string, qid: string, kid: string) => void; // Fixed prop name
+  deleteKpi: (pid: string, qid: string, kid: string) => void;
   onAddSubProject: (parentId: string) => void;
 }
 
@@ -25,23 +26,23 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ project, members, onClose
   const updateKpi = (qid: string, kid: string, field: string, val: any) => {
     const q = project.quarters[qid as keyof typeof project.quarters];
     const newKpis = q.kpis.map(k => k.id === kid ? { ...k, [field]: val } : k);
-    onUpdateQuarter(project.id, qid as keyof typeof project.quarters, 'kpis', newKpis);
+    onUpdateQuarter(project.id, qid, 'kpis', newKpis);
   };
 
   const addKpi = (qid: string) => {
     const q = project.quarters[qid as keyof typeof project.quarters];
-    onUpdateQuarter(project.id, qid as keyof typeof project.quarters, 'kpis', [...q.kpis, { id: Date.now().toString(), name: 'New KPI', target: 100, current: 0, unit: '' }]);
+    onUpdateQuarter(project.id, qid, 'kpis', [...q.kpis, { id: Date.now().toString(), name: 'New KPI', target: 100, current: 0, unit: '' }]);
   };
 
   const updateTask = (qid: string, tid: string, field: string, val: any) => {
     const q = project.quarters[qid as keyof typeof project.quarters];
     const newTasks = q.tasks.map(t => t.id === tid ? { ...t, [field]: val } : t);
-    onUpdateQuarter(project.id, qid as keyof typeof project.quarters, 'tasks', newTasks);
+    onUpdateQuarter(project.id, qid, 'tasks', newTasks);
   };
 
   const addTask = (qid: string) => {
     const q = project.quarters[qid as keyof typeof project.quarters];
-    onUpdateQuarter(project.id, qid as keyof typeof project.quarters, 'tasks', [...q.tasks, { id: Date.now().toString(), name: 'New Task', completed: false, dueDate: '', owner: null }]);
+    onUpdateQuarter(project.id, qid, 'tasks', [...q.tasks, { id: Date.now().toString(), name: 'New Task', completed: false, dueDate: '', owner: null }]);
   };
 
   return (

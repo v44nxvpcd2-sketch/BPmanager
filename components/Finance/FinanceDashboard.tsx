@@ -9,7 +9,7 @@ interface FinanceDashboardProps {
   projects: Project[];
   members: Member[];
   onClose: () => void;
-  // Fix: Widen type to string to be compatible with parent strictness
+  // Strict string type matching App.tsx and ProjectDetail.tsx now
   onUpdateQuarter: (pid: string, qid: string, field: keyof Quarter, val: any) => void;
   onSaveProjects: (newProjects: Project[]) => void;
 }
