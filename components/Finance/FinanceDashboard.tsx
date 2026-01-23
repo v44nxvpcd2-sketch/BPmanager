@@ -9,8 +9,8 @@ interface FinanceDashboardProps {
   projects: Project[];
   members: Member[];
   onClose: () => void;
-  // Fix: Strict typing for qid to match App.tsx definition
-  onUpdateQuarter: (pid: string, qid: keyof Project['quarters'], field: keyof Quarter, val: any) => void;
+  // Fix: Widen type to string to be compatible with parent strictness
+  onUpdateQuarter: (pid: string, qid: string, field: keyof Quarter, val: any) => void;
   onSaveProjects: (newProjects: Project[]) => void;
 }
 
@@ -63,8 +63,9 @@ const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ projects, members, 
     const targetProject = allProjects.find(p => p.id === selectedProjectId);
     if (!targetProject) return;
 
-    const qid = selectedQuarterId as keyof Project['quarters'];
-    const q = targetProject.quarters[qid];
+    // Use string type for qid as required by prop
+    const qKey = selectedQuarterId as keyof Project['quarters'];
+    const q = targetProject.quarters[qKey];
     const newTransaction: Transaction = {
       id: Date.now().toString(),
       type: newTransType,
@@ -75,7 +76,7 @@ const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ projects, members, 
     };
 
     const updatedTransactions = [...(q.transactions || []), newTransaction];
-    onUpdateQuarter(selectedProjectId, qid, 'transactions', updatedTransactions);
+    onUpdateQuarter(selectedProjectId, selectedQuarterId, 'transactions', updatedTransactions);
 
     // Reset form partially
     setNewTransAmount('');
@@ -88,7 +89,7 @@ const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ projects, members, 
      const qKey = qid as keyof Project['quarters'];
      const q = targetProject.quarters[qKey];
      const updatedTransactions = (q.transactions || []).filter(t => t.id !== tid);
-     onUpdateQuarter(pid, qKey, 'transactions', updatedTransactions);
+     onUpdateQuarter(pid, qid, 'transactions', updatedTransactions);
   };
 
   const handleExportExcel = () => {
