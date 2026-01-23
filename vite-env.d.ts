@@ -1,4 +1,3 @@
-
 declare module '*.svg' {
   const content: string;
   export default content;
@@ -29,5 +28,7 @@ declare module '*.webp' {
   export default content;
 }
 
-// Universal declaration for xlsx to bypass type checking issues
-declare module 'xlsx';
+declare module 'xlsx' {
+  const xlsx: any;
+  export = xlsx;
+}
