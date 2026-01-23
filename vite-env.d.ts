@@ -28,4 +28,5 @@ declare module '*.webp' {
   export default content;
 }
 
+// Simplified declaration to avoid namespace conflicts
 declare module 'xlsx';
