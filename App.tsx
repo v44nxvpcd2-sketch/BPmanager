@@ -396,7 +396,7 @@ export default function App() {
     saveProjectsToCloud(recursiveUpdate([...projects]));
   }, [projects, saveProjectsToCloud]);
 
-  const updateQuarterData = useCallback((pid: string, qid: string, field: keyof Quarter, value: any) => {
+  const updateQuarterData: (pid: string, qid: string, field: keyof Quarter, value: any) => void = useCallback((pid, qid, field, value) => {
     const recursiveUpdate = (list: Project[]): Project[] => list.map(p => {
       const qKey = qid as keyof Project['quarters']; // Safe cast inside implementation
       if (p.id === pid) {
