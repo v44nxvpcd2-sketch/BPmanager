@@ -9,7 +9,8 @@ interface FinanceDashboardProps {
   projects: Project[];
   members: Member[];
   onClose: () => void;
-  onUpdateQuarter: (pid: string, qid: string, field: keyof Quarter, val: any) => void;
+  // Fix: Strict typing for qid to match App.tsx definition
+  onUpdateQuarter: (pid: string, qid: keyof Project['quarters'], field: keyof Quarter, val: any) => void;
   onSaveProjects: (newProjects: Project[]) => void;
 }
 
@@ -62,7 +63,8 @@ const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ projects, members, 
     const targetProject = allProjects.find(p => p.id === selectedProjectId);
     if (!targetProject) return;
 
-    const q = targetProject.quarters[selectedQuarterId as keyof typeof targetProject.quarters];
+    const qid = selectedQuarterId as keyof Project['quarters'];
+    const q = targetProject.quarters[qid];
     const newTransaction: Transaction = {
       id: Date.now().toString(),
       type: newTransType,
@@ -73,7 +75,7 @@ const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ projects, members, 
     };
 
     const updatedTransactions = [...(q.transactions || []), newTransaction];
-    onUpdateQuarter(selectedProjectId, selectedQuarterId, 'transactions', updatedTransactions);
+    onUpdateQuarter(selectedProjectId, qid, 'transactions', updatedTransactions);
 
     // Reset form partially
     setNewTransAmount('');
@@ -83,9 +85,10 @@ const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ projects, members, 
   const handleDeleteTransaction = (pid: string, qid: string, tid: string) => {
      const targetProject = allProjects.find(p => p.id === pid);
      if (!targetProject) return;
-     const q = targetProject.quarters[qid as keyof typeof targetProject.quarters];
+     const qKey = qid as keyof Project['quarters'];
+     const q = targetProject.quarters[qKey];
      const updatedTransactions = (q.transactions || []).filter(t => t.id !== tid);
-     onUpdateQuarter(pid, qid, 'transactions', updatedTransactions);
+     onUpdateQuarter(pid, qKey, 'transactions', updatedTransactions);
   };
 
   const handleExportExcel = () => {
@@ -196,7 +199,8 @@ const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ projects, members, 
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const formatCurrency = (val: number) => new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', maximumFractionDigits: 0 }).format(val);
+  // Update Currency to CNY (RMB)
+  const formatCurrency = (val: number) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', maximumFractionDigits: 0 }).format(val);
 
   return (
     <div className={`fixed left-0 top-0 h-full w-[500px] bg-white z-[70] shadow-[40px_0_100px_rgba(0,0,0,0.1)] flex flex-col border-r border-gray-100 animate-in slide-in-from-left-10 duration-500`}>
@@ -329,7 +333,7 @@ const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ projects, members, 
                           </select>
                        )}
 
-                       <input placeholder="Amount (TWD)" type="number" className="w-full bg-gray-50 p-3 rounded-xl text-sm font-black outline-none placeholder:font-normal" value={newTransAmount} onChange={e => setNewTransAmount(e.target.value)} />
+                       <input placeholder="Amount (CNY)" type="number" className="w-full bg-gray-50 p-3 rounded-xl text-sm font-black outline-none placeholder:font-normal" value={newTransAmount} onChange={e => setNewTransAmount(e.target.value)} />
                        <input placeholder="Description..." className="w-full bg-gray-50 p-3 rounded-xl text-xs font-bold outline-none" value={newTransDesc} onChange={e => setNewTransDesc(e.target.value)} />
                        
                        <button onClick={handleAddTransaction} className="w-full bg-black text-[#eaff00] py-3 rounded-xl font-bold text-xs shadow-md active:scale-95 transition-all">Add Record</button>
